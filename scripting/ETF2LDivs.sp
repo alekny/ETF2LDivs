@@ -3,7 +3,7 @@
 #include <sourcemod>
 #include <system2>
 #include <regex>
-#define VERSION 		"0.1.2"
+#define VERSION 		"0.1.2~prophmod1"
 
 ConVar g_hCvarEnabled;
 ConVar g_hCvarAnnounce;
@@ -31,7 +31,7 @@ static const char ACCEPTABLE_VALUES[][] = {
 public Plugin myinfo = {
 	name = "ETF2LDivs",
 	author = "suprovsky",
-	description = "Shows a players ETF2L team and division.",
+	description = "Shows a players ETF2L team and division, with caching functionality",
 	version = VERSION,
 };
 
@@ -71,9 +71,13 @@ public void LateLoadClients(){
 	for (int client = 1; client <= MaxClients; client++) {
 		if (IsClientInGame(client) && !IsFakeClient(client)) {
 			char authStr[32];
-			GetClientAuthId(client, AuthId_SteamID64, authStr, sizeof(authStr));
-			PrintToServer("Client ID: %d, AuthStr: %s", client, authStr);
-			UpdateClientData(client, authStr);
+			//This might be a bit more secure, dont continue if for some reason
+			//there is a problem with getting the player's steamid
+			if (GetClientAuthId(client, AuthId_SteamID64, authStr, sizeof(authStr)))
+			{
+				PrintToServer("Client ID: %d, AuthStr: %s", client, authStr);
+				UpdateClientData(client, authStr);
+			}
 		}
 	}
 }
@@ -249,7 +253,14 @@ public void frameRequestPrintDivReply(int userid) {
 
 public void OnClientAuthorized(int client, const char[] auth) {
 	if (g_bEnabled) {
-		UpdateClientData(client, auth);
+		char authStr[32];
+		//We want steamid64 here, and auth only returns steamid2
+		//This check might not be necessary, since the client must be authorized at this point,
+		//still keeping it for safety tho
+		if (GetClientAuthId(client, AuthId_SteamID64, authStr, sizeof(authStr)))
+		{
+			UpdateClientData(client, authStr);
+		}
 	}
 }
 
@@ -268,21 +279,60 @@ public void UpdateClientData(int client, const char[] auth) {
 	BuildPath(Path_SM, path, sizeof(path), "configs/etf2lcache/%s.vdf", auth);
 	g_path = path;
 	g_client = client;
-	char sWebPath[255];
-	Format(sWebPath, sizeof(sWebPath), "https://api.etf2l.org/player/%s/full.vdf", auth);
-	System2HTTPRequest httpRequest = new System2HTTPRequest(httpResponseCallback, sWebPath);
-	httpRequest.FollowRedirects = true;
-	//example: 76561198011558250.vdf
-	httpRequest.SetOutputFile(path);
-	httpRequest.SetVerifySSL(false);
-	httpRequest.Timeout = 30;
-	httpRequest.GET();
-	delete httpRequest;
+
+	if (FileExists(g_path)) 
+	{
+		//File cached within last 2 weeks
+		//Note: This does not account yet for errornous data if the ETF2L api is down
+		//or the httprequests fails for some reason and fills the cache vdf with
+		//no player info.
+		if (GetTime() - GetFileTime(g_path, FileTime_LastChange) < 1209600)
+		{
+			AnnounceWhenDataCached(g_client, g_path);
+		}
+		else
+		{
+			char sWebPath[255];
+			Format(sWebPath, sizeof(sWebPath), "https://api.etf2l.org/player/%s/full.vdf", auth);
+			System2HTTPRequest httpRequest = new System2HTTPRequest(httpResponseCallback, sWebPath);
+			httpRequest.FollowRedirects = true;
+			//example: 76561198011558250.vdf
+			httpRequest.SetOutputFile(path);
+			httpRequest.SetVerifySSL(false);
+			httpRequest.Timeout = 30;
+			httpRequest.GET();
+			delete httpRequest;
+		}
+	}
+	else 
+	{
+		char sWebPath[255];
+		Format(sWebPath, sizeof(sWebPath), "https://api.etf2l.org/player/%s/full.vdf", auth);
+		System2HTTPRequest httpRequest = new System2HTTPRequest(httpResponseCallback, sWebPath);
+		httpRequest.FollowRedirects = true;
+		//example: 76561198011558250.vdf
+		httpRequest.SetOutputFile(path);
+		httpRequest.SetVerifySSL(false);
+		httpRequest.Timeout = 30;
+		httpRequest.GET();
+		delete httpRequest;
+	}
 }
 
 public void AnnounceWhenDataDownloaded(int client, const char[] path)
 {
 	PrintToServer("AnnounceWhenDataDownloaded() Client ID: %d, path %s", client, path);
+	delete g_hPlayerData[client];
+	g_hPlayerData[client] = ReadPlayer(client, path);
+
+	if (g_bAnnounce && g_hPlayerData[client] != null) {
+		AnnouncePlayerToAll(client);
+	}
+}
+
+//Do the same as AnnounceWhenDataDownloaded but dont log anything, since we haven't downloaded anything
+public void AnnounceWhenDataCached(int client, const char[] path)
+{
 	delete g_hPlayerData[client];
 	g_hPlayerData[client] = ReadPlayer(client, path);
 

@@ -2,6 +2,11 @@
 
 This SourceMod plugin shows players ETF2L team and division in the server chat when they are joining the server. It is based on [thraaawn's tETF2LDivision plugin](https://github.com/thraaawn/tETF2LDivision). At this point I wanted to thank [JoinedSenses](https://github.com/JoinedSenses) for converting whole tETF2LDivision plugin to a new SourceMod syntax and whole help provided to me while making this plugin.
 
+## Changes to original repo
+
+- added a rudimentary caching system
+- fixed (a bug?) where steamids were formatted differently
+
 ## Dependencies
 
 - [System2](https://github.com/dordnung/System2)
